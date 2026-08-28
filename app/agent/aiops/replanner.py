@@ -53,13 +53,19 @@ replanner_prompt = ChatPromptTemplate.from_messages(
 
                 你有三个选择（按优先级排序）：
 
-                **1. 'respond' - 信息充足，立即生成最终响应** 【最高优先级】
-                   - 使用场景：当前信息已经足够回答用户问题
+                **0. 任务完成守卫 - 凌驾于以下所有决策之上**
+                   - 检查原始任务要求的目标动作是否已在「已执行步骤的结果」中真正完成
+                   - 尤其对变更类任务（添加/修改/删除/提交/验证配置）：只要剩余计划中还承载着
+                     任务要求的动作（如下发后尚未 commit、commit 后尚未验证），禁止 respond
+                   - "计划里写过"不等于"已完成"，以已执行步骤的实际结果为准
+
+                **1. 'respond' - 任务目标已实际达成，生成最终响应**
+                   - 使用场景：原始任务的目标已通过「已执行步骤的结果」真正达成
                    - 决策标准：
-                     * 已执行步骤 >= 3 且获取了关键信息
-                     * 或者已执行步骤 >= 5（无论结果如何）
-                     * 或者当前信息完全满足任务需求
-                   - ⚠️ 不要等到"完美"才响应，"足够好"就应该立即 respond
+                     * 变更类任务：改动已下发并提交生效，且已验证（缺一不可）
+                     * 查询类任务：已执行步骤获取了回答所需的全部关键信息
+                     * 或者已执行步骤 >= 5（无论结果如何，防止无限执行）
+                   - ⚠️ 对变更类任务，"信息足够"不等于"任务完成"
 
                 **2. 'continue' - 当前计划合理，继续执行** 【次优先级】
                    - 使用场景：剩余计划合理且必要
@@ -69,19 +75,18 @@ replanner_prompt = ChatPromptTemplate.from_messages(
                 **3. 'replan' - 当前计划有严重问题** 【最低优先级，谨慎使用】
                    - 使用场景：原计划明显错误或遗漏关键步骤
                    - ⚠️ **严格限制**：
-                     * 新步骤数量必须 <= 当前剩余步骤数
+                     * 新步骤数量必须 <= 剩余执行预算（最多 8 步减去已执行步骤数）
                      * 优先简化计划，不要添加不必要的步骤
                      * 总步骤数已执行 >= 5 次时，禁止 replan，只能 respond
 
                 评估标准：
-                - 当前信息是否已经足够解决用户问题？【最关键】
-                - 已执行步骤是否成功获取了核心信息？
-                - 剩余步骤是否真的"必需"？
+                - 原始任务要求的目标动作是否已在已执行步骤中真正完成？【最关键】
+                - 剩余步骤是否承载着任务要求但尚未执行的动作？如果是，必须 continue
                 - 已执行步骤数是否过多（>= 5）？如果是，立即 respond
 
                 **决策优先级口诀：** 
-                "优先结束 > 保持不变 > 调整计划"
-                "信息足够就响应，不要追求完美"
+                "先看任务是否真的完成 > 保持不变 > 调整计划"
+                "变更类任务：未提交、未验证，就不算完成"
             """).strip(),
         ),
         ("placeholder", "{messages}"),
@@ -180,7 +185,7 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                 ("user", f"原始任务: {input_text}"),
                 ("user", f"已执行的步骤:\n{steps_summary}"),
                 ("user", f"剩余计划: {', '.join(plan)}"),
-                ("user", f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，请优先考虑是否信息已足够生成响应（respond）")
+                ("user", f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤。若剩余步骤仍承载任务要求的动作（如提交、验证），请选择 continue；仅当任务目标已实际达成时才选择 respond")
             ]
 
             act = await replanner_chain.ainvoke({
@@ -189,6 +194,11 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
             })
 
             # 处理返回结果
+            if act is None:
+                # structured output 偶发返回 None（LLM 抖动），继续执行剩余计划
+                logger.warning("LLM 未返回有效决策，继续执行剩余计划")
+                return {}
+
             if isinstance(act, Act):
                 action = act.action
                 new_steps = act.new_steps
@@ -204,19 +214,21 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                 return await _generate_response(state, llm)
 
             elif action == "replan":
-                # ⚠️ 强制限制：新步骤数不能超过当前剩余步骤数
-                if len(new_steps) > len(plan):
-                    logger.warning(
-                        f"新步骤数 {len(new_steps)} > 剩余步骤数 {len(plan)}，"
-                        f"强制截断为 {len(plan)} 个步骤"
-                    )
-                    new_steps = new_steps[:len(plan)]
-                
                 # ⚠️ 二次检查：如果已执行步骤 >= 5，禁止 replan
                 if len(past_steps) >= 5:
                     logger.warning(f"已执行 {len(past_steps)} 个步骤，禁止重新规划，强制生成响应")
                     return await _generate_response(state, llm)
-                
+
+                # ⚠️ 强制限制：新步骤数不能超过剩余执行预算（防失控），
+                # 而不是当前剩余步骤数 —— 否则失败重规划时步骤会被越截越少直至丢失
+                step_budget = max(1, MAX_STEPS - len(past_steps))
+                if len(new_steps) > step_budget:
+                    logger.warning(
+                        f"新步骤数 {len(new_steps)} 超出剩余执行预算 {step_budget}，"
+                        f"强制截断为 {step_budget} 个步骤"
+                    )
+                    new_steps = new_steps[:step_budget]
+
                 logger.info(f"决定调整计划，新步骤数量: {len(new_steps)}")
                 if new_steps:
                     # 替换剩余计划
@@ -264,6 +276,10 @@ async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str
         response_obj = await response_gen.ainvoke({"messages": messages})
 
         # 处理返回结果
+        if response_obj is None:
+            # structured output 偶发返回 None（LLM 抖动），走后备响应
+            raise ValueError("LLM 返回空的最终响应")
+
         if isinstance(response_obj, Response):
             final_response = response_obj.response
         else:

@@ -29,6 +29,9 @@ ENV/
 # uv
 .uv/
 
+# 项目内工具链（本地下载的 uv 等）
+.tools/
+
 # Poetry (legacy)
 poetry.lock
 

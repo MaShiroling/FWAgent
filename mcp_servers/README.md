@@ -1,6 +1,6 @@
 # MCP Servers
 
-为 AIOps 智能诊断提供日志查询和监控数据工具。
+为 AIOps 智能诊断提供日志查询、监控数据工具，以及用于配置变更全链路演练的假防火墙。
 
 ## 📚 服务列表
 
@@ -24,6 +24,31 @@
 - `search_historical_tickets` - 历史工单查询
 - `get_service_info` / `list_all_services` - 服务信息
 
+### Firewall Server (`firewall_server.py`)
+**有状态假防火墙** - 端口 8005
+
+模拟「读配置 → 下发 → 验证 → 出错处理」全链路，采用两阶段下发语义：
+所有写操作落在候选配置（candidate）上，`commit_config` 生效，`discard_candidate` 回滚。
+
+**核心工具：**
+- 读配置: `get_firewall_overview` / `list_security_zones` / `list_firewall_rules` / `get_firewall_rule`
+- 下发: `add_firewall_rule` / `update_firewall_rule` / `delete_firewall_rule` / `move_firewall_rule` / `commit_config` / `discard_candidate`
+- 验证: `get_config_diff` / `test_traffic`（模拟报文首条命中匹配）/ `get_rule_hit_count`
+
+**评测管理通道**（HTTP 路由，不暴露给 Agent）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/admin/reset` | 恢复出厂状态（body 可选 `{"keep_fault": true}`） |
+| POST | `/admin/scenario` | 注入故障：`{"fault": "none\|commit_reject\|commit_flaky\|commit_lose", "fail_times": N}` |
+| GET | `/admin/snapshot` | 导出完整状态（规则、revision、命中计数、操作审计日志），供评测打分 |
+| GET | `/admin/health` | 健康检查 |
+
+故障注入说明：
+- `commit_reject` - commit 永远被设备拒绝
+- `commit_flaky` - 前 N 次 commit 报「设备繁忙」，之后恢复（测重试）
+- `commit_lose` - commit 实际生效但返回超时失败（测 Agent 核实状态的能力）
+
 ## 🚀 快速开始
 
 ### 安装依赖
@@ -44,6 +69,7 @@ make mcp-status  # 查看服务状态
 ```bash
 python mcp_servers/cls_server.py
 python mcp_servers/monitor_server.py
+python mcp_servers/firewall_server.py
 ```
 
 ## 💡 使用示例
@@ -92,6 +118,26 @@ search_historical_tickets(
     limit=10
 )
 ```
+
+**防火墙变更全链路（读配置 → 下发 → 验证）：**
+```python
+list_firewall_rules(source="running")                       # 1. 读现有配置
+add_firewall_rule(                                          # 2. 下发到候选配置
+    name="allow-office-to-gitlab",
+    src_zone="trust", dst_zone="dmz",
+    src_addr="10.1.8.0/24", dst_addr="172.16.1.20/32",
+    protocol="tcp", dst_port="22", action="allow",
+    description="运维通道临时放行"
+)
+get_config_diff()                                           # 3. 确认改动
+commit_config()                                             # 4. 提交生效
+test_traffic(src_zone="trust", dst_zone="dmz",              # 5. 模拟报文验证
+             src_addr="10.1.8.5", dst_addr="172.16.1.20",
+             protocol="tcp", dst_port="22")
+```
+
+评测脚本可通过 `POST http://127.0.0.1:8005/admin/reset` 重置状态、
+`GET /admin/snapshot` 拉取最终配置与操作审计日志打分。
 
 ## 🔧 高级配置
 

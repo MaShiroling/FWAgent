@@ -32,10 +32,13 @@ class VectorStoreManager:
             # （模块导入时就会执行此处，早于 FastAPI lifespan 中的 milvus_manager.connect）
             _ = milvus_manager.connect()
 
-            connection_args = {
-                "host": config.milvus_host,
-                "port": config.milvus_port,
-            }
+            if config.milvus_lite_mode:
+                connection_args = {"uri": config.milvus_lite_path}
+            else:
+                connection_args = {
+                    "host": config.milvus_host,
+                    "port": config.milvus_port,
+                }
 
             # 创建 LangChain Milvus VectorStore
             # 使用 biz collection，字段映射：text_field -> content, vector_field -> vector
@@ -57,8 +60,9 @@ class VectorStoreManager:
             )
 
         except Exception as e:
-            logger.error(f"VectorStore 初始化失败: {e}")
-            raise
+            # Milvus 不可用时降级运行（知识检索返回空），不在导入期炸掉整个应用
+            self.vector_store = None
+            logger.error(f"VectorStore 初始化失败，知识库功能降级不可用: {e}")
 
     def add_documents(self, documents: List[Document]) -> List[str]:
         """

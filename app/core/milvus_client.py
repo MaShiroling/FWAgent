@@ -74,19 +74,28 @@ class MilvusClientManager:
         try:
             _patch_pymilvus_milvus_client_orm_alias()
 
-            logger.info(f"正在连接到 Milvus: {config.milvus_host}:{config.milvus_port}")
+            if config.milvus_lite_mode:
+                # Milvus Lite：嵌入式本地文件，无需 Docker/服务端
+                logger.info(f"正在启动 Milvus Lite: {config.milvus_lite_path}")
+                connections.connect(
+                    alias="default",
+                    uri=config.milvus_lite_path,
+                )
+                self._client = MilvusClient(uri=config.milvus_lite_path)
+            else:
+                logger.info(f"正在连接到 Milvus: {config.milvus_host}:{config.milvus_port}")
 
-            # 建立连接
-            connections.connect(
-                alias="default",
-                host=config.milvus_host,
-                port=str(config.milvus_port),
-                timeout=config.milvus_timeout / 1000,  # 转换为秒
-            )
+                # 建立连接
+                connections.connect(
+                    alias="default",
+                    host=config.milvus_host,
+                    port=str(config.milvus_port),
+                    timeout=config.milvus_timeout / 1000,  # 转换为秒
+                )
 
-            # 创建客户端
-            uri = f"http://{config.milvus_host}:{config.milvus_port}"
-            self._client = MilvusClient(uri=uri)
+                # 创建客户端
+                uri = f"http://{config.milvus_host}:{config.milvus_port}"
+                self._client = MilvusClient(uri=uri)
 
             logger.info("成功连接到 Milvus")
 
@@ -179,11 +188,11 @@ class MilvusClientManager:
             enable_dynamic_field=False,
         )
 
-        # 创建 collection
+        # 创建 collection（Milvus Lite 仅支持单分片）
         self._collection = Collection(
             name=self.COLLECTION_NAME,
             schema=schema,
-            num_shards=self.DEFAULT_SHARD_NUMBER,
+            num_shards=1 if config.milvus_lite_mode else self.DEFAULT_SHARD_NUMBER,
         )
 
         # 创建索引
@@ -194,11 +203,19 @@ class MilvusClientManager:
         if self._collection is None:
             raise RuntimeError("Collection 未初始化")
 
-        index_params = {
-            "metric_type": "L2",  # 欧氏距离
-            "index_type": "IVF_FLAT",
-            "params": {"nlist": 128},
-        }
+        # Milvus Lite 只支持 FLAT/AUTOINDEX，服务端使用 IVF_FLAT
+        if config.milvus_lite_mode:
+            index_params = {
+                "metric_type": "L2",
+                "index_type": "FLAT",
+                "params": {},
+            }
+        else:
+            index_params = {
+                "metric_type": "L2",  # 欧氏距离
+                "index_type": "IVF_FLAT",
+                "params": {"nlist": 128},
+            }
 
         _ = self._collection.create_index(
             field_name="vector",
@@ -211,6 +228,12 @@ class MilvusClientManager:
         """加载 collection 到内存"""
         if self._collection is None:
             self._collection = Collection(self.COLLECTION_NAME)
+
+        if config.milvus_lite_mode:
+            # Milvus Lite 不支持 utility.load_state，直接加载（重复加载是幂等的）
+            self._collection.load()
+            logger.info(f"成功加载 collection '{self.COLLECTION_NAME}'（Lite 模式）")
+            return
 
         # 检查 collection 是否已加载（兼容多版本）
         try:

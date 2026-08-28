@@ -132,8 +132,18 @@ timeout /t 2 /nobreak >nul
 echo [成功] Monitor MCP 服务已启动
 echo.
 
+REM 启动 Firewall MCP 服务
+echo [7/9] 启动 Firewall MCP 服务...
+start "Firewall MCP Server" /min %PYTHON_CMD% mcp_servers/firewall_server.py
+timeout /t 2 /nobreak >nul
+echo [成功] Firewall MCP 服务已启动
+echo.
+
 REM 启动 FastAPI 服务
-echo [7/8] 启动 FastAPI 服务...
+REM NO_PROXY：防止系统代理劫持发往 localhost 的 MCP 请求
+echo [8/9] 启动 FastAPI 服务...
+set NO_PROXY=localhost,127.0.0.1
+set no_proxy=localhost,127.0.0.1
 start "SuperBizAgent API" %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 9900
 echo [信息] 等待服务启动（15秒）...
 timeout /t 15 /nobreak >nul
@@ -150,7 +160,7 @@ if errorlevel 1 (
     echo.
     
     REM 调用 API 上传 aiops-docs 文档到向量数据库
-    echo [8/8] 上传文档到向量数据库...
+    echo [9/9] 上传文档到向量数据库...
     for %%f in (aiops-docs\*.md) do (
         echo   上传: %%~nxf
         curl -s -X POST http://localhost:9900/api/upload -F "file=@%%f" >nul 2>&1

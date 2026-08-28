@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     milvus_host: str = "localhost"
     milvus_port: int = 19530
     milvus_timeout: int = 10000  # 毫秒
+    # Milvus Lite（嵌入式，免 Docker）：设置为本地的 .db 文件路径即启用，
+    # 如 "./volumes/milvus_lite.db"；留空则使用 host:port 连接 Milvus 服务
+    # 注意：不能用 MILVUS_URI 作为环境变量名（pymilvus 导入期会解析并校验它）
+    milvus_lite_path: str = ""
 
     # RAG 配置
     rag_top_k: int = 3
@@ -48,10 +52,17 @@ class Settings(BaseSettings):
     mcp_cls_url: str = "http://localhost:8003/mcp"
     mcp_monitor_transport: str = "streamable-http"
     mcp_monitor_url: str = "http://localhost:8004/mcp"
+    mcp_firewall_transport: str = "streamable-http"
+    mcp_firewall_url: str = "http://localhost:8005/mcp"
 
     # Prometheus
     prometheus_base_url: str = "http://127.0.0.1:9090"
     prometheus_request_timeout: float = 10.0
+
+    @property
+    def milvus_lite_mode(self) -> bool:
+        """是否使用 Milvus Lite（嵌入式本地文件模式）"""
+        return bool(self.milvus_lite_path)
 
     @property
     def mcp_servers(self) -> Dict[str, Dict[str, Any]]:
@@ -64,6 +75,10 @@ class Settings(BaseSettings):
             "monitor": {
                 "transport": self.mcp_monitor_transport,
                 "url": self.mcp_monitor_url,
+            },
+            "firewall": {
+                "transport": self.mcp_firewall_transport,
+                "url": self.mcp_firewall_url,
             }
         }
 

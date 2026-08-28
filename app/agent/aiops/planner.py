@@ -128,18 +128,28 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         planner_chain = planner_prompt | llm.with_structured_output(Plan)
 
         # 调用 LLM 生成计划
-        plan_result = await planner_chain.ainvoke({
-            "messages": [("user", input_text)],
-            "tools_description": tools_description,
-            "experience_context": experience_context
-        })
+        # structured output 偶发返回 None（LLM 抖动），最多重试一次
+        plan_steps: List[str] = []
+        for attempt in range(2):
+            plan_result = await planner_chain.ainvoke({
+                "messages": [("user", input_text)],
+                "tools_description": tools_description,
+                "experience_context": experience_context
+            })
 
-        # 提取步骤列表
-        if isinstance(plan_result, Plan):
-            plan_steps = plan_result.steps
-        else:
-            # 如果返回的是字典，提取 steps 字段
-            plan_steps = plan_result.get("steps", [])  # type: ignore
+            # 提取步骤列表
+            if isinstance(plan_result, Plan):
+                plan_steps = plan_result.steps
+            elif isinstance(plan_result, dict):
+                # 如果返回的是字典，提取 steps 字段
+                plan_steps = plan_result.get("steps", [])  # type: ignore
+
+            if plan_steps:
+                break
+            logger.warning(f"LLM 未返回有效计划（第 {attempt + 1}/2 次）")
+
+        if not plan_steps:
+            raise ValueError("LLM 连续返回空计划")
 
         logger.info(f"计划已生成，共 {len(plan_steps)} 个步骤")
         for i, step in enumerate(plan_steps, 1):

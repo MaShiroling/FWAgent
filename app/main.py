@@ -26,10 +26,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 监听地址: http://{config.host}:{config.port}")
     logger.info(f"📚 API 文档: http://{config.host}:{config.port}/docs")
     
-    # 连接 Milvus
+    # 连接 Milvus（失败则降级：RAG 知识库不可用，对话/AIOps 等其他功能不受影响）
     logger.info("🔌 正在连接 Milvus...")
-    milvus_manager.connect()
-    logger.info("✅ Milvus 连接成功")
+    try:
+        milvus_manager.connect()
+        logger.info("✅ Milvus 连接成功")
+    except Exception as e:
+        logger.warning(f"⚠️ Milvus 连接失败，知识库功能降级不可用: {e}")
     
     logger.info("=" * 60)
     

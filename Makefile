@@ -21,7 +21,8 @@ NC = \033[0m
         install install-dev dev run test test-quick format lint fix type-check \
         security pre-commit-install pre-commit check-all coverage docs shell \
         ipython watch add add-dev remove list-docs test-upload sync logs \
-        start-cls stop-cls start-monitor stop-monitor start-api stop-api status-mcp
+        start-cls stop-cls start-monitor stop-monitor start-api stop-api status-mcp \
+        start-firewall stop-firewall
 
 # ============================================================
 # 默认目标：显示帮助信息
@@ -51,6 +52,8 @@ help:
 	@echo "  $(YELLOW)make stop-cls$(NC)      - 🛑 停止 CLS MCP 服务"
 	@echo "  $(YELLOW)make start-monitor$(NC) - 📊 启动 Monitor MCP 服务"
 	@echo "  $(YELLOW)make stop-monitor$(NC)  - 🛑 停止 Monitor MCP 服务"
+	@echo "  $(YELLOW)make start-firewall$(NC) - 🧱 启动 Firewall MCP 服务"
+	@echo "  $(YELLOW)make stop-firewall$(NC)  - 🛑 停止 Firewall MCP 服务"
 	@echo "  $(YELLOW)make start-api$(NC)     - 🚀 启动 FastAPI 服务"
 	@echo "  $(YELLOW)make stop-api$(NC)      - 🛑 停止 FastAPI 服务"
 	@echo ""
@@ -231,6 +234,46 @@ start-monitor:
 		fi; \
 	fi
 
+# 启动 Firewall MCP 服务
+start-firewall:
+	@echo "$(YELLOW)🧱 启动 Firewall MCP 服务...$(NC)"
+	@if pgrep -f "mcp_servers/firewall_server.py" > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ Firewall MCP 服务已经在运行中$(NC)"; \
+	else \
+		echo "$(YELLOW)📦 正在启动 Firewall MCP 服务（后台运行）...$(NC)"; \
+		nohup .venv/bin/python mcp_servers/firewall_server.py > mcp_firewall.log 2>&1 & \
+		echo $$! > mcp_firewall.pid; \
+		sleep 2; \
+		if pgrep -f "mcp_servers/firewall_server.py" > /dev/null 2>&1; then \
+			echo "$(GREEN)✅ Firewall MCP 服务启动成功$(NC)"; \
+			echo "$(YELLOW)   PID: $$(cat mcp_firewall.pid)$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8005/mcp$(NC)"; \
+			echo "$(YELLOW)   日志: mcp_firewall.log$(NC)"; \
+		else \
+			echo "$(RED)❌ Firewall MCP 服务启动失败$(NC)"; \
+			echo "$(YELLOW)请检查日志: tail -f mcp_firewall.log$(NC)"; \
+		fi; \
+	fi
+
+# 停止 Firewall MCP 服务
+stop-firewall:
+	@echo "$(YELLOW)🛑 停止 Firewall MCP 服务...$(NC)"
+	@if [ -f mcp_firewall.pid ]; then \
+		pid=$$(cat mcp_firewall.pid); \
+		if ps -p $$pid > /dev/null 2>&1; then \
+			kill $$pid; \
+			echo "$(GREEN)✅ Firewall MCP 服务已停止 (PID: $$pid)$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠️  进程不存在 (PID: $$pid)$(NC)"; \
+		fi; \
+		rm -f mcp_firewall.pid; \
+	else \
+		echo "$(YELLOW)⚠️  未找到 mcp_firewall.pid 文件$(NC)"; \
+		pkill -f "mcp_servers/firewall_server.py" 2>/dev/null && \
+			echo "$(GREEN)✅ 已停止所有 Firewall MCP 进程$(NC)" || \
+			echo "$(YELLOW)⚠️  没有运行中的 Firewall MCP 进程$(NC)"; \
+	fi
+
 # 停止 Monitor MCP 服务
 stop-monitor:
 	@echo "$(YELLOW)🛑 停止 Monitor MCP 服务...$(NC)"
@@ -280,8 +323,18 @@ status-mcp:
 		echo "  状态: $(RED)未运行$(NC)"; \
 	fi
 	@echo ""
-	@echo "$(CYAN)Math MCP 服务:$(NC)"
-	@echo "  状态: $(YELLOW)已移除（示例服务）$(NC)"
+	@echo "$(CYAN)Firewall MCP 服务:$(NC)"
+	@if pgrep -f "mcp_servers/firewall_server.py" > /dev/null 2>&1; then \
+		pid=$$(pgrep -f "mcp_servers/firewall_server.py"); \
+		echo "  状态: $(GREEN)运行中$(NC)"; \
+		echo "  PID: $$pid"; \
+		echo "  URL: http://127.0.0.1:8005/mcp"; \
+		curl -s http://127.0.0.1:8005/admin/health > /dev/null 2>&1 && \
+			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
+			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
+	else \
+		echo "  状态: $(RED)未运行$(NC)"; \
+	fi
 
 # ============================================================
 # FastAPI 服务管理
@@ -299,6 +352,9 @@ start:
 	@$(MAKE) start-monitor
 	@sleep 1
 	@echo ""
+	@$(MAKE) start-firewall
+	@sleep 1
+	@echo ""
 	@$(MAKE) start-api
 	@echo ""
 	@echo "$(GREEN)═══════════════════════════════════════════════════════$(NC)"
@@ -312,7 +368,8 @@ start-api:
 		echo "$(GREEN)✅ FastAPI 服务已经在运行中 ($(SERVER_URL))$(NC)"; \
 	else \
 		echo "$(YELLOW)📦 正在启动 FastAPI 服务（后台运行）...$(NC)"; \
-		nohup .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 9900 > server.log 2>&1 & \
+		NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" \
+			nohup .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 9900 > server.log 2>&1 & \
 		echo $$! > server.pid; \
 		echo "$(GREEN)✅ FastAPI 服务启动命令已执行$(NC)"; \
 		echo "$(YELLOW)   PID: $$(cat server.pid)$(NC)"; \
@@ -331,6 +388,8 @@ stop:
 	@$(MAKE) stop-cls
 	@echo ""
 	@$(MAKE) stop-monitor
+	@echo ""
+	@$(MAKE) stop-firewall
 	@echo ""
 	@echo "$(GREEN)═══════════════════════════════════════════════════════$(NC)"
 	@echo "$(GREEN)✅ 所有服务已停止！$(NC)"
@@ -422,12 +481,12 @@ check:
 # 开发模式运行（前台，热重载）
 dev:
 	@echo "$(YELLOW)🔧 启动开发服务器（热重载）...$(NC)"
-	.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9900
+	NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" .venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9900
 
 # 生产模式运行（前台）
 run:
 	@echo "$(YELLOW)🏭 启动生产服务器...$(NC)"
-	.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9900
+	NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9900
 
 # ============================================================
 # 文档管理
@@ -604,6 +663,7 @@ clean:  ## 清理临时文件
 	rm -f server.pid server.log
 	rm -f mcp_cls.pid mcp_cls.log
 	rm -f mcp_monitor.pid mcp_monitor.log
+	rm -f mcp_firewall.pid mcp_firewall.log
 	rm -rf uploads/*.tmp 2>/dev/null || true
 	@echo "$(GREEN)✅ 清理完成$(NC)"
 

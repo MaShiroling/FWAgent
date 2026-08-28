@@ -217,6 +217,7 @@ super_biz_agent_py/
 ├── mcp_servers/                            # MCP 服务器
 │   ├── cls_server.py                       # CLS 日志查询服务
 │   ├── monitor_server.py                   # 监控数据服务
+│   ├── firewall_server.py                  # 有状态假防火墙（配置变更演练+评测）
 │   └── README.md                           # MCP 服务说明
 ├── aiops-docs/                             # 运维知识库（Markdown 文档）
 ├── logs/                                   # 日志目录（Loguru 自动创建）
@@ -248,6 +249,8 @@ DASHSCOPE_MODEL=qwen-max
 # Milvus 配置
 MILVUS_HOST=localhost
 MILVUS_PORT=19530
+# Milvus Lite（可选，免 Docker）：设置后使用嵌入式本地文件存储，忽略上面的 host/port
+# MILVUS_LITE_PATH=./volumes/milvus_lite.db
 
 # RAG 配置
 RAG_TOP_K=3
@@ -378,11 +381,13 @@ docker compose -f vector-database.yml restart standalone
 tail -f logs/app_$(date +%Y-%m-%d).log  # FastAPI 主服务（Loguru 日志）
 tail -f mcp_cls.log                      # CLS MCP 服务
 tail -f mcp_monitor.log                  # Monitor MCP 服务
+tail -f mcp_firewall.log                 # Firewall MCP 服务
 
 # 检查端口占用
 lsof -i :9900  # FastAPI
 lsof -i :8003  # CLS MCP
 lsof -i :8004  # Monitor MCP
+lsof -i :8005  # Firewall MCP
 ```
 
 **Windows:**
@@ -392,6 +397,7 @@ $today = Get-Date -Format "yyyy-MM-dd"
 type logs\app_$today.log  # FastAPI 主服务（Loguru 日志）
 type mcp_cls.log          # CLS MCP 服务
 type mcp_monitor.log      # Monitor MCP 服务
+type mcp_firewall.log     # Firewall MCP 服务
 
 # 或者查看最新的日志文件
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 50
@@ -400,6 +406,7 @@ Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object
 netstat -ano | findstr :9900  # FastAPI
 netstat -ano | findstr :8003  # CLS MCP
 netstat -ano | findstr :8004  # Monitor MCP
+netstat -ano | findstr :8005  # Firewall MCP
 ```
 
 ## 📚 参考资源

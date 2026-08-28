@@ -27,6 +27,10 @@ def retrieve_knowledge(query: str) -> Tuple[str, List[Document]]:
         
         # 从向量存储中检索相关文档
         vector_store = vector_store_manager.get_vector_store()
+        if vector_store is None:
+            logger.warning("知识库不可用（Milvus 未连接），跳过检索")
+            return "知识库当前不可用（Milvus 未连接）。", []
+
         retriever = vector_store.as_retriever(
             search_kwargs={"k": config.rag_top_k}
         )
