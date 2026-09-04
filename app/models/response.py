@@ -3,15 +3,26 @@
 定义 API 响应的 Pydantic 模型
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any, Optional
 
 
-class ChatResponse(BaseModel):
-    """对话响应"""
+class ChatData(BaseModel):
+    """对话响应数据载荷"""
 
-    answer: str = Field(..., description="AI 回答")
-    session_id: str = Field(..., description="会话 ID")
+    success: bool = Field(..., description="是否成功")
+    answer: Optional[str] = Field(None, description="AI 回答")
+    error_message: Optional[str] = Field(None, description="错误信息", alias="errorMessage")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ChatResponse(BaseModel):
+    """对话响应（与 /api/chat 实际返回结构一致）"""
+
+    code: int = Field(..., description="业务状态码")
+    message: str = Field(..., description="状态描述")
+    data: ChatData = Field(..., description="响应数据")
 
 
 class SessionInfoResponse(BaseModel):
@@ -31,8 +42,8 @@ class ApiResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """健康检查响应"""
+    """健康检查响应（与 /health 实际返回结构一致）"""
 
-    status: str = Field(..., description="状态")
-    service: str = Field(..., description="服务名称")
-    version: str = Field(..., description="版本号")
+    code: int = Field(..., description="HTTP 状态码")
+    message: str = Field(..., description="状态描述")
+    data: Dict[str, Any] = Field(..., description="健康检查明细（服务信息、Milvus 状态等）")

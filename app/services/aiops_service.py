@@ -96,6 +96,12 @@ class AIOpsService:
         logger.info(f"[会话 {session_id}] 开始执行任务: {user_input}")
 
         try:
+            # 每次执行前清空该会话的旧检查点：
+            # past_steps 走 operator.add 追加式 reducer，initial_state 传 [] 并不会清空历史，
+            # 复用同一 session_id 时上一轮执行的 past_steps 会残留，
+            # 污染 replanner 的步数统计（>=5 禁 replan、>=8 强制出报告）
+            await self.checkpointer.adelete_thread(session_id)
+
             # 初始化状态
             initial_state: PlanExecuteState = {
                 "input": user_input,
@@ -117,18 +123,23 @@ class AIOpsService:
                 stream_mode="updates"
             ):
                 # 解析事件
-                for node_name, node_output in event.items():
+                for node_name in event:
                     logger.info(f"节点 '{node_name}' 输出事件")
+
+                    # updates 模式吐出的是节点返回的状态增量（past_steps 仅含刚追加的 1 条），
+                    # 进度统计需要全量，这里取合并后的当前状态传给事件格式化器
+                    current_state = await self.graph.aget_state(config_dict)
+                    state_values = current_state.values if current_state else {}
 
                     # 根据节点类型生成不同的事件
                     if node_name == NODE_PLANNER:
-                        yield self._format_planner_event(node_output)
+                        yield self._format_planner_event(state_values)
 
                     elif node_name == NODE_EXECUTOR:
-                        yield self._format_executor_event(node_output)
+                        yield self._format_executor_event(state_values)
 
                     elif node_name == NODE_REPLANNER:
-                        yield self._format_replanner_event(node_output)
+                        yield self._format_replanner_event(state_values)
 
             # 获取最终状态
             final_state = self.graph.get_state(config_dict)

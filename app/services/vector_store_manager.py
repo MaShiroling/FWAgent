@@ -133,25 +133,6 @@ class VectorStoreManager:
         """
         return self.vector_store
 
-    def similarity_search(self, query: str, k: int = 3) -> List[Document]:
-        """
-        相似度搜索
-
-        Args:
-            query: 查询文本
-            k: 返回结果数量
-
-        Returns:
-            List[Document]: 相关文档列表
-        """
-        try:
-            docs = self.vector_store.similarity_search(query, k=k)
-            logger.debug(f"相似度搜索完成: query='{query}', 结果数={len(docs)}")
-            return docs
-        except Exception as e:
-            logger.error(f"相似度搜索失败: {e}")
-            return []
-
 
 # 全局单例
 vector_store_manager = VectorStoreManager()

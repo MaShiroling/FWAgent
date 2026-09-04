@@ -1,13 +1,13 @@
 @echo off
 chcp 65001 >nul
 echo ====================================
-echo 停止 SuperBizAgent 服务
+echo 停止 FireDrill 服务
 echo ====================================
 echo.
 
 REM 停止 FastAPI 服务
 echo [1/5] 停止 FastAPI 服务...
-taskkill /FI "WINDOWTITLE eq SuperBizAgent API*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq FireDrill API*" /F >nul 2>&1
 if errorlevel 1 (
     echo [信息] FastAPI 服务未运行或已停止
 ) else (

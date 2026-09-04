@@ -82,3 +82,6 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
+
+# 模拟面试存档（本地专用，不上传）
+docs/mock-interview.md

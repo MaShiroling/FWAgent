@@ -4,19 +4,18 @@
 支持真正的流式输出和更好的模型适配。
 """
 
-from typing import Annotated, Any, AsyncGenerator, Dict, Sequence
+from typing import Any, AsyncGenerator, Dict
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentState, Runtime, before_model
 from langchain_core.messages import (
-    BaseMessage,
     HumanMessage,
     RemoveMessage,
     SystemMessage,
 )
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from loguru import logger
-from typing_extensions import TypedDict
 from langchain_qwq import ChatQwen
 
 from app.config import config
@@ -33,14 +32,10 @@ from app.agent.mcp_client import (
 # 同时也需要配置环境变量 DASHSCOPE_API_KEY=your_api_key
 
 
-class AgentState(TypedDict):
-    """Agent 状态"""
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-
-
-def trim_messages_middleware(state: AgentState) -> dict[str, Any] | None:
+@before_model
+def trim_messages_middleware(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     """
-    修剪消息历史，只保留最近的几条消息以适应上下文窗口
+    模型调用前修剪消息历史，只保留最近的几条消息以适应上下文窗口
 
     策略：
     - 保留第一条系统消息（System Message）
@@ -49,6 +44,7 @@ def trim_messages_middleware(state: AgentState) -> dict[str, Any] | None:
 
     Args:
         state: Agent 状态
+        runtime: LangChain 运行时上下文（本中间件未使用）
 
     Returns:
         包含修剪后消息的字典，如果无需修剪则返回 None
@@ -144,6 +140,7 @@ class RagAgentService:
             self.model,
             tools=all_tools,
             checkpointer=self.checkpointer,
+            middleware=[trim_messages_middleware],
         )
 
         self._agent_initialized = True

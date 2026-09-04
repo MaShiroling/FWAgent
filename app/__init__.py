@@ -1,6 +1,6 @@
-"""SuperBizAgent Python 版本
+"""FireDrill
 
-基于 LangChain 的智能业务代理系统
+基于 LangGraph 的防火墙智能配置演练平台
 """
 
 __version__ = "1.0.0"

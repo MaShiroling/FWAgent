@@ -1,6 +1,6 @@
-# SuperBizAgent
+# FireDrill
 
-> 企业级智能对话和运维助手，支持 RAG 知识库问答和 AIOps 智能诊断
+> 防火墙智能配置演练平台：RAG 知识库问答 + AIOps 故障诊断 + Agent 变更评测
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
@@ -38,7 +38,7 @@
 ```bash
 # 1. 克隆项目
 git clone <repository_url>
-cd super_biz_agent_py
+cd firedrill
 
 # 2. 安装依赖（推荐使用 uv）
 # 方式 1: 使用 uv（推荐，更快）
@@ -68,7 +68,7 @@ make start
 ```powershell
 # 1. 克隆项目
 git clone <repository_url>
-cd super_biz_agent_py
+cd firedrill
 
 # 2. 创建虚拟环境并安装依赖
 # 方式 1: 使用 uv（推荐，更快）
@@ -141,7 +141,7 @@ python -c "import requests, os, time; [requests.post('http://localhost:9900/api/
 | 流式对话 | POST | `/api/chat_stream` | SSE 流式输出 |
 | AIOps 诊断 | POST | `/api/aiops` | 自动故障诊断（流式） |
 | 文件上传 | POST | `/api/upload` | 上传并索引文档 |
-| 健康检查 | GET | `/api/health` | 服务状态检查 |
+| 健康检查 | GET | `/health` | 服务状态检查 |
 
 ### 使用示例
 
@@ -167,7 +167,7 @@ curl -X POST "http://localhost:9900/api/aiops" \
 ## 📁 项目结构
 
 ```
-super_biz_agent_py/
+firedrill/
 ├── app/                                    # 应用核心
 │   ├── __init__.py                         # 包初始化（自动加载日志配置）
 │   ├── main.py                             # FastAPI 应用入口
@@ -185,7 +185,6 @@ super_biz_agent_py/
 │   │   ├── vector_store_manager.py         # 向量存储管理器
 │   │   ├── vector_embedding_service.py     # 向量embedding服务
 │   │   ├── vector_index_service.py         # 向量索引服务
-│   │   ├── vector_search_service.py        # 向量检索服务
 │   │   └── document_splitter_service.py    # 文档分割服务
 │   ├── agent/                              # Agent 模块
 │   │   ├── __init__.py
@@ -209,7 +208,6 @@ super_biz_agent_py/
 │   │   └── time_tool.py                    # 时间工具
 │   ├── core/                               # 核心组件
 │   │   ├── __init__.py
-│   │   ├── llm_factory.py                  # LLM 工厂（模型管理）
 │   │   └── milvus_client.py                # Milvus 客户端
 │   └── utils/                              # 工具类
 │       ├── __init__.py

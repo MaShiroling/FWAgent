@@ -1,7 +1,7 @@
 [project]
-name = "super-biz-agent-py"
+name = "firedrill"
 version = "1.2.1"
-description = "基于 LangChain 的智能业务代理系统 - 支持 RAG 知识库和 AIOps 智能运维"
+description = "FireDrill - 防火墙智能配置演练平台（RAG 知识库 + AIOps 诊断 + Agent 变更评测）"
 authors = [{name = "chief"}]
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

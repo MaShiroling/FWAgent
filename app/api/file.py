@@ -1,6 +1,7 @@
 """文件上传接口模块"""
 
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -98,7 +99,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @router.post("/index_directory")
-async def index_directory(directory_path: str = None):
+async def index_directory(directory_path: Optional[str] = None):
     """
     索引指定目录下的所有文件
 

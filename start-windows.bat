@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ====================================
-echo 启动 SuperBizAgent 服务
+echo 启动 FireDrill 服务
 echo ====================================
 echo.
 
@@ -144,7 +144,7 @@ REM NO_PROXY：防止系统代理劫持发往 localhost 的 MCP 请求
 echo [8/9] 启动 FastAPI 服务...
 set NO_PROXY=localhost,127.0.0.1
 set no_proxy=localhost,127.0.0.1
-start "SuperBizAgent API" %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 9900
+start "FireDrill API" %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 9900
 echo [信息] 等待服务启动（15秒）...
 timeout /t 15 /nobreak >nul
 echo.

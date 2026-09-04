@@ -1,5 +1,5 @@
-// SuperBizAgent 前端应用
-class SuperBizAgentApp {
+// FireDrill 前端应用
+class FireDrillApp {
     constructor() {
         this.apiBaseUrl = 'http://localhost:9900/api';
         this.currentMode = 'quick'; // 'quick' 或 'stream'
@@ -616,7 +616,7 @@ class SuperBizAgentApp {
         // 更新输入框状态
         if (this.messageInput) {
             this.messageInput.disabled = this.isStreaming;
-            this.messageInput.placeholder = '问问智能OnCall助手';
+            this.messageInput.placeholder = '问问 FireDrill';
         }
     }
 
@@ -1115,10 +1115,10 @@ class SuperBizAgentApp {
             return;
         }
 
-        // 验证文件大小（限制为50MB）
-        const maxSize = 50 * 1024 * 1024;
+        // 验证文件大小（与后端 /api/upload 限制保持一致：10MB）
+        const maxSize = 10 * 1024 * 1024;
         if (file.size > maxSize) {
-            this.showNotification('文件大小不能超过50MB', 'error');
+            this.showNotification('文件大小不能超过10MB', 'error');
             return;
         }
 
@@ -1687,5 +1687,5 @@ document.head.appendChild(style);
 
 // 初始化应用
 document.addEventListener('DOMContentLoaded', () => {
-    new SuperBizAgentApp();
+    new FireDrillApp();
 });

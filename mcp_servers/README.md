@@ -8,21 +8,18 @@
 **日志查询服务** - 端口 8003
 
 **核心工具：**
-- `get_current_timestamp` - 获取当前时间戳
-- `get_topic_info_by_name` - 查询日志主题
-- `search_log` - 日志搜索
-- `search_service_logs` - 服务日志查询（支持级别筛选）
-- `analyze_log_pattern` - 日志模式分析
+- `get_current_timestamp` - 获取当前毫秒时间戳（供 search_log 计算时间范围）
+- `get_region_code_by_name` - 按中文地区名查地区代码
+- `get_topic_info_by_name` - 按主题名精确查询日志主题
+- `search_topic_by_service_name` - 按服务名搜索日志主题（"服务名 → topic_id"的主入口）
+- `search_log` - 按 topic_id + 毫秒时间范围搜索日志（核心查询工具）
 
 ### Monitor Server (`monitor_server.py`)
 **监控数据服务** - 端口 8004
 
 **核心工具：**
-- `query_cpu_metrics` - CPU 使用率查询
-- `query_memory_metrics` - 内存使用查询
-- `query_process_list` - 进程列表
-- `search_historical_tickets` - 历史工单查询
-- `get_service_info` / `list_all_services` - 服务信息
+- `query_cpu_metrics` - CPU 使用率时间序列查询（含 80% 阈值告警判断）
+- `query_memory_metrics` - 内存使用率时间序列查询（含 70% 阈值告警判断）
 
 ### Firewall Server (`firewall_server.py`)
 **有状态假防火墙** - 端口 8005
@@ -79,14 +76,13 @@ python mcp_servers/firewall_server.py
 ```
 用户: data-sync-service 出现告警，请排查
 
-Agent 自动执行:
-1. list_all_services() → 查看所有服务状态
-2. get_service_info("data-sync-service") → 获取服务详情
-3. query_cpu_metrics("data-sync-service") → CPU 趋势分析
-4. search_service_logs("data-sync-service", level="error") → 错误日志
-5. analyze_log_pattern("data-sync-service") → 日志模式分析
-6. search_historical_tickets(service_name="data-sync-service") → 历史工单
-7. 综合分析 → 生成诊断报告和修复建议
+Agent 自动执行（计划由 Planner 动态生成，以下为典型路径）:
+1. query_prometheus_alerts()（本地工具）→ 获取当前活动告警
+2. query_cpu_metrics("data-sync-service") → CPU 趋势分析
+3. query_memory_metrics("data-sync-service") → 内存趋势分析
+4. search_topic_by_service_name("data-sync-service") → 定位日志主题
+5. search_log(topic_id, start_time, end_time) → 查询日志
+6. 综合分析 → 生成诊断报告和修复建议
 ```
 
 ### 工具参数示例
@@ -100,22 +96,14 @@ query_cpu_metrics(
 )
 ```
 
-**搜索错误日志：**
+**搜索日志：**
 ```python
-search_service_logs(
-    service_name="data-sync-service",
-    log_level="error",
-    keyword="timeout",
+# 先用 get_current_timestamp() 拿当前毫秒时间戳，再计算时间范围
+search_log(
+    topic_id="topic-001",
+    start_time=1708011445000,   # 15 分钟前（毫秒时间戳）
+    end_time=1708012345000,     # 当前时间
     limit=100
-)
-```
-
-**搜索历史工单：**
-```python
-search_historical_tickets(
-    service_name="data-sync-service",
-    issue_type="cpu",
-    limit=10
 )
 ```
 

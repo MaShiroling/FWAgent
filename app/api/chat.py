@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from app.models.request import ChatRequest, ClearRequest
-from app.models.response import SessionInfoResponse, ApiResponse
+from app.models.response import SessionInfoResponse, ApiResponse, ChatResponse
 from app.agent.mcp_client import format_exception_chain
 from app.services.rag_agent_service import rag_agent_service
 from loguru import logger
@@ -15,7 +15,7 @@ from loguru import logger
 router = APIRouter()
 
 
-@router.post("/chat")
+@router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """快速对话接口
     {
@@ -70,19 +70,16 @@ async def chat(request: ChatRequest):
 async def chat_stream(request: ChatRequest):
     """流式对话接口（基于 RAG Agent，SSE）
 
-    返回 SSE 格式，data 字段为 JSON：
+    返回 SSE 格式，event 恒为 message，data 字段为 JSON 字符串。事件类型：
 
-    工具调用事件:
-    event: message
-    data: {"type":"tool_call","data":{"tool":"工具名","status":"start|end","input":{...}}}
-
-    内容流式事件:
-    event: message
+    内容流式事件（若干个，LLM 逐 token 生成）:
     data: {"type":"content","data":"内容块"}
 
-    完成事件:
-    event: message
-    data: {"type":"done","data":{"answer":"完整答案","tool_calls":[...]}}
+    完成事件（最后一个，data 为 null；完整答案由前端累积 content 事件拼接）:
+    data: {"type":"done","data":null}
+
+    错误事件:
+    data: {"type":"error","data":"错误信息"}
 
     Args:
         request: 对话请求
