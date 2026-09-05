@@ -93,6 +93,57 @@ replanner_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
+# 修复前的旧版提示词（commit 6ac25dd），仅用于 A/B 对照实验（REPLANNER_LEGACY=1）
+replanner_prompt_legacy = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            dedent("""
+                作为一个重新规划专家，你需要根据已执行的步骤决定下一步行动。
+
+                可用工具列表（用于制定计划时参考）：
+
+                {tools_description}
+
+                注意：你的职责是制定或调整计划，实际的工具调用由 Executor 负责执行。
+
+                你有三个选择（按优先级排序）：
+
+                **1. 'respond' - 信息充足，立即生成最终响应** 【最高优先级】
+                   - 使用场景：当前信息已经足够回答用户问题
+                   - 决策标准：
+                     * 已执行步骤 >= 3 且获取了关键信息
+                     * 或者已执行步骤 >= 5（无论结果如何）
+                     * 或者当前信息完全满足任务需求
+                   - ⚠️ 不要等到"完美"才响应，"足够好"就应该立即 respond
+
+                **2. 'continue' - 当前计划合理，继续执行** 【次优先级】
+                   - 使用场景：剩余计划合理且必要
+                   - 决策标准：剩余步骤确实能提供关键信息
+                   - ⚠️ 如果剩余步骤不是"必需"的，应选择 respond
+
+                **3. 'replan' - 当前计划有严重问题** 【最低优先级，谨慎使用】
+                   - 使用场景：原计划明显错误或遗漏关键步骤
+                   - ⚠️ **严格限制**：
+                     * 新步骤数量必须 <= 当前剩余步骤数
+                     * 优先简化计划，不要添加不必要的步骤
+                     * 总步骤数已执行 >= 5 次时，禁止 replan，只能 respond
+
+                评估标准：
+                - 当前信息是否已经足够解决用户问题？【最关键】
+                - 已执行步骤是否成功获取了核心信息？
+                - 剩余步骤是否真的"必需"？
+                - 已执行步骤数是否过多（>= 5）？如果是，立即 respond
+
+                **决策优先级口诀：** 
+                "优先结束 > 保持不变 > 调整计划"
+                "信息足够就响应，不要追求完美"
+            """).strip(),
+        ),
+        ("placeholder", "{messages}"),
+    ]
+)
+
 # 最终响应生成提示词
 response_prompt = ChatPromptTemplate.from_messages(
     [
@@ -178,14 +229,26 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     if plan:
         logger.info("还有剩余计划，评估下一步行动")
 
-        replanner_chain = replanner_prompt | llm.with_structured_output(Act)
+        legacy = config.replanner_legacy
+        if legacy:
+            logger.warning("REPLANNER_LEGACY=1：使用修复前的旧提示词（A/B 对照模式）")
+
+        prompt = replanner_prompt_legacy if legacy else replanner_prompt
+        replanner_chain = prompt | llm.with_structured_output(Act)
 
         try:
+            if legacy:
+                hint = (f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，"
+                        "请优先考虑是否信息已足够生成响应（respond）")
+            else:
+                hint = (f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤。"
+                        "若剩余步骤仍承载任务要求的动作（如提交、验证），请选择 continue；"
+                        "仅当任务目标已实际达成时才选择 respond")
             messages = [
                 ("user", f"原始任务: {input_text}"),
                 ("user", f"已执行的步骤:\n{steps_summary}"),
                 ("user", f"剩余计划: {', '.join(plan)}"),
-                ("user", f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤。若剩余步骤仍承载任务要求的动作（如提交、验证），请选择 continue；仅当任务目标已实际达成时才选择 respond")
+                ("user", hint)
             ]
 
             act = await replanner_chain.ainvoke({
@@ -219,15 +282,16 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                     logger.warning(f"已执行 {len(past_steps)} 个步骤，禁止重新规划，强制生成响应")
                     return await _generate_response(state, llm)
 
-                # ⚠️ 强制限制：新步骤数不能超过剩余执行预算（防失控），
-                # 而不是当前剩余步骤数 —— 否则失败重规划时步骤会被越截越少直至丢失
-                step_budget = max(1, MAX_STEPS - len(past_steps))
-                if len(new_steps) > step_budget:
+                # ⚠️ 强制限制新步骤数：
+                # - 对照模式：旧策略，不超过当前剩余步骤数（会随执行越截越少）
+                # - 正常模式：不超过剩余执行预算（MAX_STEPS - 已执行），防失控且不丢步骤
+                step_cap = len(plan) if legacy else max(1, MAX_STEPS - len(past_steps))
+                if len(new_steps) > step_cap:
                     logger.warning(
-                        f"新步骤数 {len(new_steps)} 超出剩余执行预算 {step_budget}，"
-                        f"强制截断为 {step_budget} 个步骤"
+                        f"新步骤数 {len(new_steps)} 超出上限 {step_cap}，"
+                        f"强制截断为 {step_cap} 个步骤"
                     )
-                    new_steps = new_steps[:step_budget]
+                    new_steps = new_steps[:step_cap]
 
                 logger.info(f"决定调整计划，新步骤数量: {len(new_steps)}")
                 if new_steps:

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     rag_top_k: int = 3
     rag_model: str = "qwen-max"  # 使用快速响应模型，不带扩展思考
 
+    # 评测对照开关：True 时 replanner 使用修复前的旧提示词与旧截断策略，
+    # 用于复现"变更任务提前收尾（假完成）"行为做 A/B 实验
+    replanner_legacy: bool = False
+
     # 文档分块配置
     chunk_max_size: int = 800
     chunk_overlap: int = 100

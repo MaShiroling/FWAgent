@@ -488,6 +488,7 @@ def get_firewall_overview() -> Dict[str, Any]:
     Returns:
         Dict: hostname、model、firmware、running_revision、pending_changes 等
     """
+    STATE._audit("get_firewall_overview", {}, "success", "查询设备概览")
     return {
         "success": True,
         "hostname": STATE.hostname,
@@ -524,6 +525,8 @@ def list_firewall_rules(source: str = "running") -> Dict[str, Any]:
     if source not in ("running", "candidate"):
         return {"success": False, "error": f"source 非法: '{source}'，可选 running/candidate"}
     rules = STATE.running_rules if source == "running" else STATE.candidate_rules
+    STATE._audit("list_firewall_rules", {"source": source}, "success",
+                 f"查询规则列表（{source}，{len(rules)} 条）")
     return {
         "success": True,
         "source": source,
@@ -547,6 +550,8 @@ def get_firewall_rule(rule_id: str) -> Dict[str, Any]:
                           ("running", STATE.running_rules)):
         for r in rules:
             if r["rule_id"] == rule_id:
+                STATE._audit("get_firewall_rule", {"rule_id": rule_id}, "success",
+                             f"查询规则详情（{source}）")
                 return {"success": True, "source": source, "rule": r}
     return {"success": False, "error": f"规则不存在: {rule_id}"}
 
@@ -687,6 +692,7 @@ def get_config_diff() -> Dict[str, Any]:
     Returns:
         Dict: has_changes、added/removed/modified/moved 规则列表、running_revision
     """
+    STATE._audit("get_config_diff", {}, "success", "查询配置差异")
     return STATE.diff()
 
 
