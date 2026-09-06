@@ -258,7 +258,17 @@ MILVUS_PORT=19530
 RAG_TOP_K=3
 CHUNK_MAX_SIZE=800
 CHUNK_OVERLAP=100
+
+# Agent 结构化执行轨迹（用于离线评测与数据飞轮）
+AGENT_TRACE_ENABLED=true
+AGENT_TRACE_DIR=evals/artifacts/runs
+AGENT_TRACE_MAX_VALUE_CHARS=8000
 ```
+
+防火墙评测采用带外终态硬断言，不使用 LLM 打分；结果会同时输出稳定失败码与证据，详见
+[`evals/EVALUATION_SCHEMA.md`](evals/EVALUATION_SCHEMA.md)。
+失败运行还可以自动去重、排序并生成可执行回放集，详见
+[`evals/FLYWHEEL.md`](evals/FLYWHEEL.md)。
 
 ## 🎯 AIOps 智能运维
 

@@ -1,6 +1,6 @@
 """RAG 检索对照实验
 
-三个变体在 35 条标注查询上的命中率对比：
+三个变体在 36 条标注查询上的命中率对比：
   1. naive-v4   ：text-embedding-v4(1024d) + 原始查询直接检索（现有生产链路）
   2. rewrite-v4 ：text-embedding-v4 + LLM 查询改写后检索
   3. naive-v2   ：text-embedding-v2(1536d，中文优化旧版) + 原始查询

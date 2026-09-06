@@ -67,6 +67,8 @@ uploads/
 
 # 评测运行日志（含环境信息的进程日志，不入库；结果数据 jsonl 保留）
 evals/results/*.log
+# 每次 Agent 执行产生的结构化轨迹可能包含运行环境信息，不直接入库
+evals/artifacts/
 
 # OS
 .DS_Store

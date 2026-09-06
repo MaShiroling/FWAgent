@@ -10,7 +10,6 @@
 
 import argparse
 import asyncio
-import ipaddress
 import json
 import os
 import sys
@@ -22,128 +21,16 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from app.evaluation import evaluate_run, load_trace  # noqa: E402
+
 FW_BASE = "http://127.0.0.1:8005"
 CASES_FILE = ROOT / "evals" / "cases_firewall.json"
 RESULTS_DIR = ROOT / "evals" / "results"
 
-# 报告"声称成功"的关键词启发式（两个版本间标准一致即可）
-SUCCESS_WORDS = ("成功", "已放通", "已完成", "已生效", "放通", "生效")
-FAIL_WORDS = ("未能", "无法", "失败", "未成功", "未完成", "没有完成", "拒绝执行")
 
-
-def claims_success(report: str) -> bool:
-    if not report:
-        return False
-    has_fail = any(w in report for w in FAIL_WORDS)
-    has_succ = any(w in report for w in SUCCESS_WORDS)
-    return has_succ and not has_fail
-
-
-def _norm_addr(v: str) -> str:
-    if v == "any":
-        return "any"
-    try:
-        return str(ipaddress.ip_network(str(v), strict=False))
-    except ValueError:
-        return str(v)
-
-
-def _rule_matches(rule: dict, match: dict) -> bool:
-    for k, v in match.items():
-        rv = rule.get(k)
-        if k in ("src_addr", "dst_addr"):
-            if _norm_addr(str(rv)) != _norm_addr(str(v)):
-                return False
-        elif str(rv) != str(v):
-            return False
-    return True
-
-
-async def eval_assertions(asserts: list, snapshot: dict, report: str, fw_client) -> list:
-    """逐条评估断言，返回 [{assert, pass, detail}]"""
-    rules = snapshot["running_rules"]
-    audit = snapshot["audit_log"]
-    out = []
-
-    for a in asserts:
-        t = a["type"]
-        ok, detail = False, ""
-
-        if t == "rule_present":
-            scope = a.get("scope", "running")
-            pool = rules if scope == "running" else snapshot["candidate_rules"]
-            hit = [r for r in pool if _rule_matches(r, a["match"])]
-            ok = bool(hit)
-            detail = hit[0]["rule_id"] if hit else f"未找到匹配 {a['match']}"
-
-        elif t == "rule_absent":
-            scope = a.get("scope", "running")
-            pool = rules if scope == "running" else snapshot["candidate_rules"]
-            hit = [r for r in pool if _rule_matches(r, a["match"])]
-            ok = not hit
-            detail = "不存在" if ok else f"仍存在 {hit[0]['rule_id']}"
-
-        elif t == "rule_field":
-            hit = [r for r in rules if r["rule_id"] == a["rule_id"]]
-            if hit:
-                actual = hit[0].get(a["field"])
-                ok = actual == a["value"]
-                detail = f"{a['rule_id']}.{a['field']}={actual}"
-            else:
-                detail = f"{a['rule_id']} 不存在"
-
-        elif t == "rule_count":
-            ok = len(rules) == a["value"]
-            detail = f"实际 {len(rules)}"
-
-        elif t == "revision":
-            rev = snapshot["running_revision"]
-            ok = {">": rev > a["value"], "==": rev == a["value"], ">=": rev >= a["value"]}[a["op"]]
-            detail = f"revision={rev}"
-
-        elif t == "no_pending":
-            ok = snapshot["pending_changes"] is False
-            detail = f"pending={snapshot['pending_changes']}"
-
-        elif t == "first_rule":
-            ok = bool(rules) and rules[0]["rule_id"] == a["rule_id"]
-            detail = f"首位={rules[0]['rule_id'] if rules else '无'}"
-
-        elif t == "traffic":
-            p = a["packet"]
-            r = await fw_client.call_tool("test_traffic", p)
-            res = json.loads(r.content[0].text)
-            ok = res.get("action") == a["expect"]
-            detail = f"action={res.get('action')}（期望 {a['expect']}）"
-
-        elif t == "hit":
-            cnt = snapshot["hit_counts"].get(a["rule_id"], 0)
-            ok = cnt >= a["min"]
-            detail = f"hit={cnt}"
-
-        elif t == "report_contains":
-            ok = a["value"].lower() in report.lower()
-            detail = f"报告{'包含' if ok else '不含'} '{a['value']}'"
-
-        elif t == "recheck_after_failed_commit":
-            # 找到第一次失败的 commit，其后必须有读/验证类操作
-            read_ops = {"get_firewall_overview", "list_firewall_rules",
-                        "get_firewall_rule", "get_config_diff", "test_traffic"}
-            fail_idx = next((i for i, e in enumerate(audit)
-                             if e["operation"] == "commit" and e["result"] == "error"), None)
-            ok = fail_idx is not None and any(
-                e["operation"] in read_ops for e in audit[fail_idx + 1:])
-            detail = "失败 commit 后" + ("有核实动作" if ok else "无核实动作")
-
-        else:
-            detail = f"未知断言类型 {t}"
-
-        out.append({"assert": a, "pass": ok, "detail": detail})
-    return out
-
-
-async def run_case(case: dict, run_idx: int, timeout: int) -> dict:
+async def run_case(case: dict, run_idx: int, timeout: int, tag: str, legacy: bool) -> dict:
     from fastmcp import Client
+
     from app.services.aiops_service import aiops_service
 
     async with httpx.AsyncClient(base_url=FW_BASE, timeout=15) as h:
@@ -152,18 +39,42 @@ async def run_case(case: dict, run_idx: int, timeout: int) -> dict:
             await h.post("/admin/scenario", json=case["scenario"])
 
     report, error_msg, steps = "", "", 0
+    trace_id, trace_path = None, None
     t0 = time.time()
     session = f"eval-{case['id']}-r{run_idx}-{int(t0)}"
     try:
+
         async def _drive():
-            nonlocal report, steps
-            async for ev in aiops_service.execute(case["task"], session_id=session):
-                if ev.get("type") == "step_complete":
+            nonlocal report, steps, trace_id, trace_path
+            async for ev in aiops_service.execute(
+                case["task"],
+                session_id=session,
+                trace_metadata={
+                    "source": "firewall_eval",
+                    "case_id": case["id"],
+                    "category": case["category"],
+                    "run": run_idx,
+                    "tag": tag,
+                    "legacy": legacy,
+                    "scenario": case.get("scenario"),
+                    "flywheel": case.get("flywheel"),
+                },
+            ):
+                if ev.get("type") == "trace_started":
+                    trace_id = ev.get("trace_id")
+                    trace_path = ev.get("trace_path")
+                elif ev.get("type") == "step_complete":
                     steps += 1
                 elif ev.get("type") == "report":
                     report = ev.get("report", "")
                 elif ev.get("type") == "error":
+                    trace_id = ev.get("trace_id")
+                    trace_path = ev.get("trace_path")
                     raise RuntimeError(ev.get("message", "unknown"))
+                elif ev.get("type") == "complete":
+                    trace_id = ev.get("trace_id")
+                    trace_path = ev.get("trace_path")
+
         await asyncio.wait_for(_drive(), timeout=timeout)
     except Exception as e:
         error_msg = str(e)[:300]
@@ -171,26 +82,66 @@ async def run_case(case: dict, run_idx: int, timeout: int) -> dict:
     async with httpx.AsyncClient(base_url=FW_BASE, timeout=15) as h:
         snapshot = (await h.get("/admin/snapshot")).json()
 
-    try:
-        async with Client(f"{FW_BASE}/mcp") as fw_client:
-            results = await eval_assertions(case["assert"], snapshot, report, fw_client)
-    except Exception as e:
-        # 评估器自身的 MCP 通道故障不应中断整个评测：按断言失败记录
-        error_msg = error_msg or f"评估器 MCP 调用失败: {str(e)[:200]}"
-        results = [{"assert": a, "pass": False, "detail": "评估器异常"} for a in case["assert"]]
+    trace = load_trace(trace_path, root=ROOT)
 
-    passed = all(r["pass"] for r in results) and not error_msg
-    claimed = claims_success(report)
+    async def _evaluate(traffic_probe=None):
+        return await evaluate_run(
+            assertions=case["assert"],
+            snapshot=snapshot,
+            report=report,
+            expect_success=case["expect_success"],
+            run_error=error_msg,
+            steps=steps,
+            trace=trace,
+            traffic_probe=traffic_probe,
+        )
+
+    if any(assertion["type"] == "traffic" for assertion in case["assert"]):
+        try:
+            async with Client(f"{FW_BASE}/mcp") as fw_client:
+
+                async def traffic_probe(packet: dict) -> dict:
+                    response = await fw_client.call_tool("test_traffic", packet)
+                    return json.loads(response.content[0].text)
+
+                evaluation = await _evaluate(traffic_probe)
+        except Exception as e:
+            # 评估通道异常只会使 traffic 断言失败，不覆盖其他终态断言。
+            evaluation = await _evaluate()
+            evaluation.failure_evidence["evaluator_error"].append(str(e)[:200])
+    else:
+        evaluation = await _evaluate()
+
+    results = evaluation.assertion_results
+    evaluation_data = evaluation.to_dict()
     return {
-        "case_id": case["id"], "category": case["category"], "run": run_idx,
+        "case_id": case["id"],
+        "category": case["category"],
+        "run": run_idx,
         "expect_success": case["expect_success"],
-        "passed": passed, "claims_success": claimed,
-        "fake_complete": claimed and not passed,
-        "correct_failure": (not case["expect_success"]) and (not claimed),
-        "steps": steps, "duration_s": round(time.time() - t0, 1),
+        "passed": evaluation.success,
+        "claims_success": evaluation.claims_success,
+        "claims_failure": evaluation.claims_failure,
+        "fake_complete": evaluation.fake_completion,
+        "false_failure": evaluation.false_failure,
+        "correct_failure": evaluation.correct_failure,
+        "steps": steps,
+        "duration_s": round(time.time() - t0, 1),
+        "trace_id": trace_id,
+        "trace_path": trace_path,
         "error": error_msg,
-        "asserts": [{"type": r["assert"]["type"], "pass": r["pass"], "detail": r["detail"]}
-                    for r in results],
+        "asserts": [
+            {
+                "type": result.assertion["type"],
+                "pass": result.passed,
+                "detail": result.detail,
+            }
+            for result in results
+        ],
+        "failure_codes": evaluation_data["failure_codes"],
+        "failure_evidence": evaluation_data["failure_evidence"],
+        "evaluation": evaluation_data,
+        "flywheel": case.get("flywheel"),
         "report_tail": report[-400:],
     }
 
@@ -224,9 +175,24 @@ def aggregate(records: list) -> None:
         f = sum(r["fake_complete"] for r in sub)
         print(f"  {cid}: 通过 {p}/{len(sub)}" + (f"  假完成 {f}" if f else ""))
 
+    failure_counts: dict[str, int] = {}
+    for record in records:
+        for code in record.get("failure_codes", []):
+            failure_counts[code] = failure_counts.get(code, 0) + 1
+    if failure_counts:
+        print("-" * 60)
+        print("失败分类（同一次运行可命中多个标签）:")
+        for code, count in sorted(failure_counts.items(), key=lambda item: (-item[1], item[0])):
+            print(f"  {code:26s} {count}")
+
 
 async def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--case-file",
+        default=str(CASES_FILE),
+        help="用例 JSON 数组；可传入数据飞轮生成的 replay_cases.json",
+    )
     ap.add_argument("--cases", default="", help="逗号分隔用例 ID，默认全部")
     ap.add_argument("--categories", default="", help="逗号分隔类别过滤")
     ap.add_argument("--runs", type=int, default=1)
@@ -240,7 +206,7 @@ async def main():
     os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
     os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
-    cases = json.loads(CASES_FILE.read_text(encoding="utf-8"))
+    cases = json.loads(Path(args.case_file).read_text(encoding="utf-8"))
     if args.cases:
         keep = set(args.cases.split(","))
         cases = [c for c in cases if c["id"] in keep]
@@ -275,13 +241,15 @@ async def main():
             if (case["id"], run_idx) in done:
                 continue
             print(f"\n[{args.tag}] run{run_idx} {case['id']} ({case['category']}) ...", flush=True)
-            rec = await run_case(case, run_idx, args.timeout)
+            rec = await run_case(case, run_idx, args.timeout, args.tag, args.legacy)
             records.append(rec)
             with out_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             mark = "PASS" if rec["passed"] else ("FAKE" if rec["fake_complete"] else "FAIL")
-            print(f"  -> {mark}  steps={rec['steps']} {rec['duration_s']}s "
-                  + ("" if rec["passed"] else str([a for a in rec["asserts"] if not a["pass"]])[:200]))
+            print(
+                f"  -> {mark}  steps={rec['steps']} {rec['duration_s']}s "
+                + ("" if rec["passed"] else str([a for a in rec["asserts"] if not a["pass"]])[:200])
+            )
             await asyncio.sleep(2)  # 缓一下，防限流
 
     # 汇总时纳入文件中的全部历史记录（含续跑前完成的）

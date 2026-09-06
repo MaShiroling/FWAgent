@@ -3,7 +3,8 @@
 使用 Pydantic Settings 实现类型安全的配置管理
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +47,13 @@ class Settings(BaseSettings):
     # 用于复现"变更任务提前收尾（假完成）"行为做 A/B 实验
     replanner_legacy: bool = False
 
+    # Agent 结构化执行轨迹（用于离线评测与数据飞轮）
+    agent_trace_enabled: bool = True
+    agent_trace_dir: str = "evals/artifacts/runs"
+    agent_trace_max_value_chars: int = 8000
+    agent_model_max_attempts: int = 2
+    agent_model_retry_delay_s: float = 0.5
+
     # 文档分块配置
     chunk_max_size: int = 800
     chunk_overlap: int = 100
@@ -69,7 +77,7 @@ class Settings(BaseSettings):
         return bool(self.milvus_lite_path)
 
     @property
-    def mcp_servers(self) -> Dict[str, Dict[str, Any]]:
+    def mcp_servers(self) -> dict[str, dict[str, Any]]:
         """获取完整的 MCP 服务器配置"""
         return {
             "cls": {
@@ -83,7 +91,7 @@ class Settings(BaseSettings):
             "firewall": {
                 "transport": self.mcp_firewall_transport,
                 "url": self.mcp_firewall_url,
-            }
+            },
         }
 
 
